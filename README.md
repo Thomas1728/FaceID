@@ -1,2 +1,2 @@
 # FaceID
- YOLO v3
+Implementation of YOLO v3 algorithm via Pytorch
