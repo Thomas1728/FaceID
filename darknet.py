@@ -20,16 +20,16 @@ def parse_cfg(config_file):
     for line in lines:
 
         if line[0] == '[':
-            if len(element_dict) != 0:  # appending the dict stored on previous iteration
+            if len(element_dict) != 0:
                 output.append(element_dict)
-                element_dict = {}  # again emtying dict
+                element_dict = {}
             element_dict['type'] = ''.join([i for i in line if i != '[' and i != ']'])
 
         else:
             val = line.split('=')
-            element_dict[val[0].rstrip()] = val[1].lstrip()  # removing spaces on left and right side
+            element_dict[val[0].rstrip()] = val[1].lstrip()
 
-    output.append(element_dict)  # appending the values stored for last set
+    output.append(element_dict)
 
     return output
 
@@ -78,9 +78,6 @@ def create_model(blocks):
             seq.add_module("upsample_{}".format(i), upsample)
 
         elif block["type"] == 'route':
-            # start and end is given in format (eg:-1 36 so we will find layer number from it.
-            # we will find layer number in negative format
-            # so that we can get the number of filters in that layer
             block['layers'] = block['layers'].split(',')
             block['layers'][0] = int(block['layers'][0])
             start = block['layers'][0]
@@ -128,27 +125,23 @@ def prediction(x, inp_dim, anchors, num_classes, CUDA=True):
     # x --> 4D feature map
     batch_size = x.size(0)
     grid_size = x.size(2)
-    stride = inp_dim // x.size(2)  # factor by which current feature map reduced from input
-    #     grid_size = inp_dim // stride
+    stride = inp_dim // x.size(2)
 
     bbox_attributes = 5 + num_classes
     num_anchors = len(anchors)
-    #
+
     prediction = x.view(batch_size, bbox_attributes * num_anchors, grid_size * grid_size)
     prediction = prediction.transpose(1, 2).contiguous()
     prediction = prediction.view(batch_size, grid_size * grid_size * num_anchors, bbox_attributes)
 
-    # the dimension of anchors is wrt original image.We will make it corresponding to feature map
     anchors = [(a[0] / stride, a[1] / stride) for a in anchors]
-    # Sigmoid the  centre_X, centre_Y. and object confidencce
     prediction[:, :, 0] = torch.sigmoid(prediction[:, :, 0])
     prediction[:, :, 1] = torch.sigmoid(prediction[:, :, 1])
     prediction[:, :, 4] = torch.sigmoid(prediction[:, :, 4])
-    # Add the center offsets
     grid = np.arange(grid_size)
     a, b = np.meshgrid(grid, grid)
 
-    x_offset = torch.FloatTensor(a).view(-1, 1)  # (1,gridsize*gridsize,1)
+    x_offset = torch.FloatTensor(a).view(-1, 1)
     y_offset = torch.FloatTensor(b).view(-1, 1)
 
     if CUDA:
@@ -159,14 +152,13 @@ def prediction(x, inp_dim, anchors, num_classes, CUDA=True):
 
     prediction[:, :, :2] += x_y_offset
 
-    # log space transform height and the width
     anchors = torch.FloatTensor(anchors)
 
     if CUDA:
         anchors = anchors.cuda()
 
     anchors = anchors.repeat(grid_size * grid_size, 1).unsqueeze(0)
-    prediction[:, :, 2:4] = torch.exp(prediction[:, :, 2:4]) * anchors  # width and height
+    prediction[:, :, 2:4] = torch.exp(prediction[:, :, 2:4]) * anchors
     prediction[:, :, 5: 5 + num_classes] = torch.sigmoid((prediction[:, :, 5: 5 + num_classes]))
     prediction[:, :, :4] *= stride
     return prediction
@@ -181,10 +173,10 @@ class Darknet(nn.Module):
         self.blocks = parse_cfg(cfgfile)
         self.net_info, self.module_list = create_model(self.blocks)
 
-    def forward(self, x, CUDA=False):
+    def forward(self, x, CUDA=True):
         modules = self.blocks[1:]
-        outputs = {}  # We cache the outputs for the route layer
-        write = 0  # This is explained a bit later
+        outputs = {}
+        write = 0
         for i, module in enumerate(modules):
             module_type = (module["type"])
             if module_type == "convolutional" or module_type == "upsample":
@@ -206,23 +198,19 @@ class Darknet(nn.Module):
             elif module_type == "shortcut":
                 from_ = int(module["from"])
 
-                # just adding outputs for residual network
                 x = outputs[i - 1] + outputs[i + from_]
                 outputs[i] = x
 
             elif module_type == 'yolo':
                 anchors = self.module_list[i][0].anchors
 
-                # Get the input dimensions
                 inp_dim = int(self.net_info["height"])
-                # Get the number of classes
                 num_classes = int(module["classes"])
 
-                # Transform
-                x = x.data  # get the data at that point
+                x = x.data
                 x = prediction(x, inp_dim, anchors, num_classes)
 
-                if not write:  # if no collector has been intialised.
+                if not write:
                     detections = x
                     write = 1
                 else:
@@ -231,26 +219,19 @@ class Darknet(nn.Module):
                 outputs[i] = outputs[i - 1]
 
         try:
-            return detections  # return detections if present
+            return detections
         except:
             return 0
 
     def load_weights(self, weightfile):
 
-        # Open the weights file
         fp = open(weightfile, "rb")
 
-        # The first 4 values are header information
-        # 1. Major version number
-        # 2. Minor Version Number
-        # 3. Subversion number
-        # 4. IMages seen
         header = np.fromfile(fp, dtype=np.int32, count=5)
         self.header = torch.from_numpy(header)
         self.seen = self.header[3]
 
-        # The rest of the values are the weights
-        # Let's load them up
+
         weights = np.fromfile(fp, dtype=np.float32)
 
         ptr = 0
@@ -269,10 +250,8 @@ class Darknet(nn.Module):
                 if (batch_normalize):
                     bn = model[1]
 
-                    # Get the number of weights of Batch Norm Layer
                     num_bn_biases = bn.bias.numel()
 
-                    # Load the weights
                     bn_biases = torch.from_numpy(weights[ptr:ptr + num_bn_biases])
                     ptr += num_bn_biases
 
@@ -285,39 +264,30 @@ class Darknet(nn.Module):
                     bn_running_var = torch.from_numpy(weights[ptr: ptr + num_bn_biases])
                     ptr += num_bn_biases
 
-                    # Cast the loaded weights into dims of model weights.
                     bn_biases = bn_biases.view_as(bn.bias.data)
                     bn_weights = bn_weights.view_as(bn.weight.data)
                     bn_running_mean = bn_running_mean.view_as(bn.running_mean)
                     bn_running_var = bn_running_var.view_as(bn.running_var)
 
-                    # Copy the data to model
                     bn.bias.data.copy_(bn_biases)
                     bn.weight.data.copy_(bn_weights)
                     bn.running_mean.copy_(bn_running_mean)
                     bn.running_var.copy_(bn_running_var)
 
                 else:
-                    # Number of biases
                     num_biases = conv.bias.numel()
 
-                    # Load the weights
                     conv_biases = torch.from_numpy(weights[ptr: ptr + num_biases])
                     ptr = ptr + num_biases
 
-                    # reshape the loaded weights according to the dims of the model weights
                     conv_biases = conv_biases.view_as(conv.bias.data)
 
-                    # Finally copy the data
                     conv.bias.data.copy_(conv_biases)
 
-                # Let us load the weights for the Convolutional layers
                 num_weights = conv.weight.numel()
 
-                # Do the same as above for weights
                 conv_weights = torch.from_numpy(weights[ptr:ptr + num_weights])
                 ptr = ptr + num_weights
 
                 conv_weights = conv_weights.view_as(conv.weight.data)
                 conv.weight.data.copy_(conv_weights)
-                # Note: we dont have bias for conv when batch normalization is there

@@ -14,11 +14,9 @@ def bbox_iou(box1, box2):
     Returns the IoU of two bounding boxes
 
     """
-    # Get the coordinates of bounding boxes
     b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]
     b2_x1, b2_y1, b2_x2, b2_y2 = box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]
 
-    # get the corrdinates of the intersection rectangle
     intersection_rectangle_x1 = torch.max(b1_x1, b2_x1)
     intersection_rectangle_y1 = torch.max(b1_y1, b2_y1)
     intersection_rectangle_x2 = torch.min(b1_x2, b2_x2)
@@ -67,13 +65,11 @@ def write_results(prediction, confidence, num_classes, nms_conf=0.4):
         max_conf = max_conf.float().unsqueeze(1)
         max_conf_score = max_conf_score.float().unsqueeze(1)
         seq = (image_pred[:, :5], max_conf, max_conf_score)
-        # concatinating index values and max probability with box cordinates as columns
         image_pred = torch.cat(seq, 1)
 
         non_zero_ind = (torch.nonzero(image_pred[:, 4]))
         image_pred_ = image_pred[non_zero_ind.squeeze(), :].view(-1, 7)
         try:
-
             img_classes = unique(image_pred_[:, -1])
         except:
             continue
@@ -120,13 +116,7 @@ def load_classes(namesfile):
     return names
 
 
-# function converting images from opencv format to torch format
 def prep_image(img, inp_dim):
-    """
-    Prepare image for inputting to the neural network.
-
-    Returns a Variable
-    """
 
     orig_im = cv2.imread(img)
     dim = orig_im.shape[1], orig_im.shape[0]
@@ -136,10 +126,8 @@ def prep_image(img, inp_dim):
     return img_, orig_im, dim
 
 
-# function letterbox_image that resizes our image, keeping the
-# aspect ratio consistent, and padding the left out areas with the color (128,128,128)
+
 def letterbox_image(img, inp_dim):
-    '''resize image with unchanged aspect ratio using padding'''
     img_w, img_h = img.shape[1], img.shape[0]
     w, h = inp_dim
     new_w = int(img_w * min(w / img_w, h / img_h))
